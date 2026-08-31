@@ -209,6 +209,23 @@ class FSResourcesHandler(FSHandler):
         except OSError as exc:
             log.error(f"Unable to remove partial file {relative_path}: {str(exc)}")
 
+    async def _remove_covers_except(
+        self, entity: Rom | Collection, keep_ext: str
+    ) -> None:
+        """Remove stored covers whose extension differs from the one just written.
+
+        Args:
+            entity: Rom or Collection object
+            keep_ext: extension of the cover just written, without the dot
+        """
+        cover_path = self.validate_path(f"{entity.fs_resources_path}/cover")
+        for size in CoverSize:
+            for matched_file in cover_path.glob(f"{size.value}.*"):
+                if matched_file.suffix.lower() != f".{keep_ext.lower()}":
+                    await self.remove_file(
+                        str(matched_file.relative_to(self.base_path))
+                    )
+
     async def _store_cover(self, entity: Rom | Collection, url_cover: str) -> None:
         """Fetch a cover once and write both sizes.
 
@@ -288,6 +305,8 @@ class FSResourcesHandler(FSHandler):
                 await self._discard_partial_file(small_path)
                 return None
 
+            # Before deriving: the WebP copies written next would not survive it.
+            await self._remove_covers_except(entity, "png")
             await asyncio.to_thread(
                 self._write_derived_covers,
                 self.validate_path(big_path),
@@ -416,6 +435,7 @@ class FSResourcesHandler(FSHandler):
                     )
                 else:
                     img.save(path_cover_l)
+            await self._remove_covers_except(entity, file_ext)
             await asyncio.to_thread(
                 self._write_derived_covers, path_cover_l, path_cover_s
             )
