@@ -175,6 +175,23 @@ class FSResourcesHandler(FSHandler):
         except OSError as exc:
             log.error(f"Unable to remove partial file {relative_path}: {str(exc)}")
 
+    async def _remove_covers_except(
+        self, entity: Rom | Collection, keep_ext: str
+    ) -> None:
+        """Remove stored covers whose extension differs from the one just written.
+
+        Args:
+            entity: Rom or Collection object
+            keep_ext: extension of the cover just written, without the dot
+        """
+        cover_path = self.validate_path(f"{entity.fs_resources_path}/cover")
+        for size in CoverSize:
+            for matched_file in cover_path.glob(f"{size.value}.*"):
+                if matched_file.suffix.lower() != f".{keep_ext.lower()}":
+                    await self.remove_file(
+                        str(matched_file.relative_to(self.base_path))
+                    )
+
     async def _store_cover(self, entity: Rom | Collection, url_cover: str) -> None:
         """Fetch a cover once and write both sizes.
 
@@ -258,6 +275,8 @@ class FSResourcesHandler(FSHandler):
                 self.resize_cover_to_small(
                     img, save_path=str(self.validate_path(small_path))
                 )
+
+            await self._remove_covers_except(entity, "png")
 
             if ENABLE_SCHEDULED_CONVERT_IMAGES_TO_WEBP:
                 self.image_converter.convert_to_webp(
@@ -385,6 +404,8 @@ class FSResourcesHandler(FSHandler):
             with Image.open(artwork) as img:
                 img.save(path_cover_l)
                 self.resize_cover_to_small(img, save_path=str(path_cover_s))
+
+                await self._remove_covers_except(entity, file_ext)
 
                 if ENABLE_SCHEDULED_CONVERT_IMAGES_TO_WEBP:
                     self.image_converter.convert_to_webp(path_cover_l, force=True)
