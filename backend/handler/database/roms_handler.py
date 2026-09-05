@@ -545,6 +545,19 @@ class DBRomsHandler(DBBaseHandler):
         if hidden_rom_ids:
             query = query.where(Rom.id.not_in(hidden_rom_ids))
 
+        # `sibling_roms` is a VIEW self-joining `roms` on an OR across seven
+        # metadata-id columns. MariaDB merges the view but then picks the wrong
+        # drive table: it index-scans the whole `roms` side first and applies
+        # this `rom_id IN (page ids)` filter last, through a block-nested-loop
+        # join. That costs a flat ~6s per call regardless of platform or offset
+        # -- and since the gallery calls this for every page it fetches, it was
+        # the dominant term in `GET /api/roms` (measured 6.1s of a 6.3s
+        # response). STRAIGHT_JOIN forces the page ids to drive instead, so
+        # MariaDB range-checks the metadata indexes per row: ~0.08s, same rows.
+        # Gated on the driver because STRAIGHT_JOIN is MySQL/MariaDB-only.
+        if ROMM_DB_DRIVER in ("mariadb", "mysql"):
+            query = query.prefix_with("STRAIGHT_JOIN")
+
         rows = session.execute(query).all()
 
         # Dedupe by (parent rom, sibling id) so a duplicate join row doesn't
