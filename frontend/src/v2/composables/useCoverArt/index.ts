@@ -21,9 +21,15 @@
 //
 // Alt-art paths come from `ss_metadata` (preferred) or `gamelist_metadata`
 // and are relative to `FRONTEND_RESOURCES_PATH`. The local cover chain
-// (`path_cover_large` → `path_cover_small`) gets a webp rewrite when the
-// server serves webp; alt-art / explicit override URLs are treated as
-// final.
+// gets a webp rewrite when the server serves webp; alt-art / explicit
+// override URLs are treated as final.
+//
+// WHICH of the two stored covers that chain resolves to follows `context`.
+// RomM writes a `big` (478x864) and a `small` (191x345) file for every rom.
+// Gallery surfaces paint the cover at roughly 158px and take `small`; the
+// details page and the player heroes show it large and take `big`. Grids
+// pull dozens of covers at once, so the difference there is a page-load
+// cost, not a per-image one.
 //
 //   const art = useCoverArt(() => props.rom);
 //   <img :src="art.coverUrl.value" :style="{ objectFit: art.objectFit.value }" />
@@ -178,6 +184,10 @@ interface ComputeOptions {
    *  blobs, external provider URLs). Treated as final — no webp rewrite,
    *  no alt-art swap. */
   coverSrc?: string | null;
+  /** Which of the rom's two stored covers to prefer. Either falls back to
+   *  the other when absent. Defaults to `"large"`, so non-Vue callers keep
+   *  the original behaviour. */
+  coverSize?: "small" | "large";
 }
 
 /** Pure resolution core — no Vue, no stores. Exported for unit tests and
@@ -202,7 +212,10 @@ export function computeCoverArt(
   } else if (altPath != null) {
     coverUrl = `${opts.resourcesPath}/${altPath}`;
   } else {
-    const local = rom.path_cover_large ?? rom.path_cover_small ?? null;
+    const local =
+      opts.coverSize === "small"
+        ? (rom.path_cover_small ?? rom.path_cover_large ?? null)
+        : (rom.path_cover_large ?? rom.path_cover_small ?? null);
     coverUrl =
       local && opts.supportsWebp ? local.replace(RASTER_EXT, ".webp") : local;
   }
@@ -297,6 +310,15 @@ export function useCoverArt(
     return override === undefined ? supportsWebp.value : override;
   });
 
+  // Only the surfaces that render a cover large take the large file. Every
+  // other surface — gallery grids and the thumbnail-sized ones that leave
+  // `context` unset (activity rows, home widgets, pickers, the cover PIP) —
+  // paints it small enough that the stored small file is indistinguishable.
+  const coverSize = computed<"small" | "large">(() => {
+    const ctx = options.context ? toValue(options.context) : undefined;
+    return ctx === "details" || ctx === "player" ? "large" : "small";
+  });
+
   const descriptor = computed<CoverArtDescriptor>(() => {
     const r = toValue(rom);
     const s = style.value;
@@ -321,6 +343,7 @@ export function useCoverArt(
       resourcesPath: FRONTEND_RESOURCES_PATH,
       supportsWebp: effectiveWebp.value,
       coverSrc: coverSrc.value,
+      coverSize: coverSize.value,
     });
   });
 
