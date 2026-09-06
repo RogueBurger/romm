@@ -122,6 +122,7 @@ async def heartbeat() -> HeartbeatResponse:
             "DISABLE_USERPASS_LOGIN": DISABLE_USERPASS_LOGIN,
             "DISABLE_LOGS_VIEWER": DISABLE_LOGS_VIEWER,
             "YOUTUBE_BASE_URL": YOUTUBE_BASE_URL,
+            "IMAGES_WEBP": ENABLE_SCHEDULED_CONVERT_IMAGES_TO_WEBP,
         },
         "OIDC": {
             "ENABLED": OIDC_ENABLED,

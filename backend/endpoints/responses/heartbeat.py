@@ -36,6 +36,7 @@ class FrontendDict(TypedDict):
     DISABLE_USERPASS_LOGIN: bool
     DISABLE_LOGS_VIEWER: bool
     YOUTUBE_BASE_URL: str
+    IMAGES_WEBP: bool
 
 
 class OIDCDict(TypedDict):
