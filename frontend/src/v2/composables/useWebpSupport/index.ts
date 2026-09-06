@@ -18,7 +18,10 @@ interface FrontendWithWebp {
   FRONTEND?: { IMAGES_WEBP?: boolean };
 }
 
-const RASTER_EXT = /\.(png|jpe?g)$/i;
+// Cover URLs carry a `?ts=<updated_at>` cache-buster (see Rom.path_cover_large),
+// so the extension is not at the end of the string. Match it before an optional
+// query or fragment and rewrite only the extension, leaving the query intact.
+const RASTER_EXT = /\.(png|jpe?g)(?=$|[?#])/i;
 
 export function useWebpSupport(): {
   supportsWebp: ComputedRef<boolean>;

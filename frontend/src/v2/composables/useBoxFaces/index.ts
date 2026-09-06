@@ -40,7 +40,10 @@ export interface BoxFaces {
   complete: boolean;
 }
 
-const RASTER_EXT = /\.(png|jpe?g)$/i;
+// Cover URLs carry a `?ts=<updated_at>` cache-buster (see Rom.path_cover_large),
+// so the extension is not at the end of the string. Match it before an optional
+// query or fragment and rewrite only the extension, leaving the query intact.
+const RASTER_EXT = /\.(png|jpe?g)(?=$|[?#])/i;
 
 function resourceUrl(path: string | null | undefined): string | null {
   return path ? `${FRONTEND_RESOURCES_PATH}/${path}` : null;

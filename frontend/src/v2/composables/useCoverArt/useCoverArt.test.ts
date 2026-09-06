@@ -144,6 +144,18 @@ describe("computeCoverArt — cover_path", () => {
     );
     expect(d.coverUrl).toBe("covers/large.webp");
   });
+
+  it("rewrites the extension when the cover URL carries a ?ts= cache-buster", () => {
+    const d = computeCoverArt(
+      rom({ path_cover_large: "covers/large.png?ts=2026-08-31 12:55:32" }),
+      "cover_path",
+      {
+        resourcesPath: RES,
+        supportsWebp: true,
+      },
+    );
+    expect(d.coverUrl).toBe("covers/large.webp?ts=2026-08-31 12:55:32");
+  });
   it("exposes url_cover as the fallback and flags no artwork when empty", () => {
     expect(
       computeCoverArt(rom({ url_cover: "https://x/c.png" }), "cover_path", {

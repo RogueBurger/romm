@@ -85,7 +85,10 @@ export const COVER_RATIOS: Record<BoxartStyle, number> = {
   miximage_v2_path: 1,
 };
 
-const RASTER_EXT = /\.(png|jpe?g)$/i;
+// Cover URLs carry a `?ts=<updated_at>` cache-buster (see Rom.path_cover_large),
+// so the extension is not at the end of the string. Match it before an optional
+// query or fragment and rewrite only the extension, leaving the query intact.
+const RASTER_EXT = /\.(png|jpe?g)(?=$|[?#])/i;
 
 export function isBoxartStyle(value: unknown): value is BoxartStyle {
   return (
