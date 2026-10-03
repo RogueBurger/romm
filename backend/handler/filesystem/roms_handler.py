@@ -151,6 +151,14 @@ GENERIC_TAG_REGEX = re.compile(r"\(([^)]+)\)|\[([^]]+)\]")
 VERSION_TAG_REGEX = re.compile(r"^(?:version|ver|v)(?:[\s._-](.*)|([.\d].*))", re.I)
 REGION_TAG_REGEX = re.compile(r"^reg[\s|-](.*)$", re.I)
 REVISION_TAG_REGEX = re.compile(r"^rev[\s|-](.*)$", re.I)
+# No-Intro numbers repeated development stages ("Beta 12", "Proto 2"). The
+# number is what tells the dumps apart, but as a tag it splits one stage into a
+# facet value per build, so file it under the bare stage; the filename keeps it.
+NUMBERED_STAGE_TAG_REGEX = re.compile(
+    r"^(Beta|Proto|Demo|Sample|Promo|Putative Proto)\s+\d+$"
+)
+# A build date ("1995-04-27") identifies a dump without being worth filtering by.
+DATE_TAG_REGEX = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 
 
 @dataclass(frozen=True)
@@ -241,8 +249,16 @@ class FSRomsHandler(FSHandler):
                 revision = revision_match[1]
                 continue
 
+            # Numbered stage: tag the stage itself. Build date: no tag at all.
+            stage_match = NUMBERED_STAGE_TAG_REGEX.match(raw_tag)
+            if stage_match:
+                raw_tag = stage_match[1]
+            elif DATE_TAG_REGEX.match(raw_tag):
+                continue
+
             # Anything else
-            other_tags.append(raw_tag)
+            if raw_tag not in other_tags:
+                other_tags.append(raw_tag)
 
         return ParsedTags(
             version=version,
