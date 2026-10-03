@@ -157,6 +157,9 @@ REVISION_TAG_REGEX = re.compile(r"^rev[\s|-](.*)$", re.I)
 NUMBERED_STAGE_TAG_REGEX = re.compile(
     r"^(Beta|Proto|Demo|Sample|Promo|Putative Proto)\s+\d+$"
 )
+# RetroAchievements names subsets "[Subset - Professor Oak Challenge]". The name
+# tells two subsets of one game apart, so the filename keeps it; the tag is "Subset".
+SUBSET_TAG_REGEX = re.compile(r"^Subset\s*-\s*\S")
 # A build date ("1995-04-27") identifies a dump without being worth filtering by.
 DATE_TAG_REGEX = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 
@@ -249,10 +252,12 @@ class FSRomsHandler(FSHandler):
                 revision = revision_match[1]
                 continue
 
-            # Numbered stage: tag the stage itself. Build date: no tag at all.
+            # Numbered stage or named subset: tag the kind. Build date: no tag.
             stage_match = NUMBERED_STAGE_TAG_REGEX.match(raw_tag)
             if stage_match:
                 raw_tag = stage_match[1]
+            elif SUBSET_TAG_REGEX.match(raw_tag):
+                raw_tag = "Subset"
             elif DATE_TAG_REGEX.match(raw_tag):
                 continue
 

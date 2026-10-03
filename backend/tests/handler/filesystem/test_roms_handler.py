@@ -197,6 +197,17 @@ class TestFSRomsHandler:
         ]:
             assert handler.parse_tags(fs_name).other_tags == expected, fs_name
 
+    def test_parse_tags_subset_names_collapse(self, handler: FSRomsHandler):
+        """A named subset files under "Subset"; the filename keeps the name"""
+        for fs_name, expected in [
+            ("Game (USA) [Subset - Professor Oak Challenge].gba", ["Subset"]),
+            ("Game (USA) [Subset - Skill Mastery & Best Weapons].gba", ["Subset"]),
+            ("Game (USA) [Subset].gba", ["Subset"]),
+            ("Game (USA) (Beta 2) [Subset - Bonus].gba", ["Beta", "Subset"]),
+            ("Game (USA) [Subsetter].gba", ["Subsetter"]),
+        ]:
+            assert handler.parse_tags(fs_name).other_tags == expected, fs_name
+
     def test_parse_tags_build_dates_are_not_tags(self, handler: FSRomsHandler):
         """A build date identifies a dump but is not a facet"""
         parsed_tags = handler.parse_tags("Game (USA) (Beta) (1995-04-27).gg")
