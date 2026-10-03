@@ -138,6 +138,11 @@ HLTB_API_ENABLED: Final[bool] = safe_str_to_bool(_get_env("HLTB_API_ENABLED"))
 
 # AUTH
 ROMM_AUTH_SECRET_KEY: Final[str] = _get_env("ROMM_AUTH_SECRET_KEY", "")
+# Whose main-sibling choices stand in for a user who has made none in a group.
+# A username; empty keeps each user to their own choices only.
+MAIN_SIBLING_DEFAULT_USER: Final[str] = (
+    _get_env("MAIN_SIBLING_DEFAULT_USER", "").strip().lower()
+)
 if not ROMM_AUTH_SECRET_KEY:
     raise ValueError("ROMM_AUTH_SECRET_KEY environment variable is not set!")
 

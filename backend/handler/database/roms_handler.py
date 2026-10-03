@@ -31,6 +31,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.orm import (
+    aliased,
     Query,
     QueryableAttribute,
     Session,
@@ -43,7 +44,7 @@ from sqlalchemy.orm import (
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import Select
 
-from config import ROMM_DB_DRIVER
+from config import MAIN_SIBLING_DEFAULT_USER, ROMM_DB_DRIVER
 from decorators.database import begin_session
 from handler.metadata.base_handler import UniversalPlatformSlug as UPS
 from handler.redis_handler import sync_cache
@@ -52,6 +53,7 @@ from models.base import compute_file_name_parts
 from models.collection import Collection, CollectionRom, SmartCollection
 from models.music import MusicFavoriteTrack, MusicPlaylistTrack
 from models.platform import Platform
+from models.user import User
 from models.rom import (
     METADATA_SOURCE_COLUMNS,
     Rom,
@@ -495,6 +497,54 @@ class DBRomsHandler(DBBaseHandler):
 
         return buckets
 
+    @begin_session
+    def get_default_main_sibling_user_id(
+        self, session: Session = None  # type: ignore
+    ) -> int | None:
+        """The user whose main-sibling choices stand in for users who made none.
+
+        Named by MAIN_SIBLING_DEFAULT_USER. None when that is unset or names no
+        user, which leaves every user with only their own choices.
+        """
+        if not MAIN_SIBLING_DEFAULT_USER:
+            return None
+        return session.scalar(
+            select(User.id).where(User.username == MAIN_SIBLING_DEFAULT_USER)
+        )
+
+    @begin_session
+    def resolve_main_siblings(
+        self,
+        user_id: int | None,
+        groups: dict[int, set[int]],
+        session: Session = None,  # type: ignore
+    ) -> dict[int, set[int]]:
+        """For each group of sibling rom ids, the ids that count as main for a user.
+
+        The user's own choice wins. In a group where they have chosen nothing,
+        the default user's choice (see get_default_main_sibling_user_id) stands
+        in for it, so a library curated once reads the same for every user.
+        """
+        default_id = self.get_default_main_sibling_user_id(session=session)
+        users = {u for u in (user_id, default_id) if u is not None}
+        all_ids = set().union(*groups.values()) if groups else set()
+        if not users or not all_ids:
+            return {key: set() for key in groups}
+        rows = session.execute(
+            select(RomUser.rom_id, RomUser.user_id).where(
+                RomUser.rom_id.in_(all_ids),
+                RomUser.user_id.in_(users),
+                RomUser.is_main_sibling.is_(True),
+            )
+        ).all()
+        own = {rom_id for rom_id, uid in rows if uid == user_id}
+        stand_in = (
+            {rom_id for rom_id, uid in rows if uid == default_id}
+            if default_id is not None and default_id != user_id
+            else set()
+        )
+        return {key: (ids & own) or (ids & stand_in) for key, ids in groups.items()}
+
     def get_siblings_for_roms(
         self,
         rom_ids: list[int],
@@ -570,7 +620,20 @@ class DBRomsHandler(DBBaseHandler):
             seen[rom_id].add(sibling.id)
             buckets[rom_id].append((sibling, bool(is_main)))
 
-        return buckets
+        # Resolve "main" across the whole group, so a group with no choice by
+        # this user takes the default user's (MAIN_SIBLING_DEFAULT_USER).
+        mains = self.resolve_main_siblings(
+            user_id,
+            {
+                rom_id: {rom_id} | {sibling.id for sibling, _ in sibs}
+                for rom_id, sibs in buckets.items()
+            },
+            session=session,
+        )
+        return {
+            rom_id: [(sibling, sibling.id in mains[rom_id]) for sibling, _ in sibs]
+            for rom_id, sibs in buckets.items()
+        }
 
     def filter_by_platform_id(self, query: Query, platform_id: int):
         return query.filter(Rom.platform_id == platform_id)
@@ -1312,7 +1375,7 @@ class DBRomsHandler(DBBaseHandler):
             # inputs are read straight from base_subquery, so keeping them out of
             # this SELECT keeps the window's temp table narrow (carrying the wide
             # fs_name_no_ext through it spilled the sort to disk).
-            group_subquery = (
+            group_select = (
                 select(base_subquery.c.id)
                 .select_from(base_subquery)
                 .outerjoin(
@@ -1321,7 +1384,29 @@ class DBRomsHandler(DBBaseHandler):
                         base_subquery.c.id == RomUser.rom_id, RomUser.user_id == user_id
                     ),
                 )
-                .add_columns(
+            )
+            # Where the user has chosen no main in a group, the default user's
+            # choice (MAIN_SIBLING_DEFAULT_USER) decides, ahead of the alphabet.
+            sibling_order = [is_main_sibling_order]
+            default_main_user_id = self.get_default_main_sibling_user_id(
+                session=session
+            )
+            if default_main_user_id is not None and default_main_user_id != user_id:
+                default_rom_user = aliased(RomUser)
+                group_select = group_select.outerjoin(
+                    default_rom_user,
+                    and_(
+                        base_subquery.c.id == default_rom_user.rom_id,
+                        default_rom_user.user_id == default_main_user_id,
+                    ),
+                )
+                sibling_order.append(
+                    func.coalesce(
+                        cast(default_rom_user.is_main_sibling, Integer), 0
+                    ).desc()
+                )
+            group_subquery = (
+                group_select.add_columns(
                     func.row_number()
                     .over(
                         partition_by=func.coalesce(
@@ -1372,7 +1457,7 @@ class DBRomsHandler(DBBaseHandler):
                             ),
                         ),
                         order_by=[
-                            is_main_sibling_order,
+                            *sibling_order,
                             base_subquery.c.fs_name_no_ext.asc(),
                         ],
                     )
