@@ -169,6 +169,37 @@ class TestFSRomsHandler:
         assert "Italian" in parsed_tags.languages
         assert "Beta" in parsed_tags.other_tags
 
+    def test_parse_tags_numbered_stages_collapse(self, handler: FSRomsHandler):
+        """A numbered stage files under the bare stage; the filename keeps the number"""
+        for fs_name, expected in [
+            ("Game (USA) (Beta 12).gg", ["Beta"]),
+            ("Game (USA) (Proto 2).gg", ["Proto"]),
+            ("Game (Japan) (Demo 1).gg", ["Demo"]),
+            ("Game (USA) (Putative Proto 3).gg", ["Putative Proto"]),
+            ("Game (USA) (Beta) (Beta 2).gg", ["Beta"]),
+        ]:
+            assert handler.parse_tags(fs_name).other_tags == expected, fs_name
+
+    def test_parse_tags_build_dates_are_not_tags(self, handler: FSRomsHandler):
+        """A build date identifies a dump but is not a facet"""
+        parsed_tags = handler.parse_tags("Game (USA) (Beta) (1995-04-27).gg")
+
+        assert parsed_tags.other_tags == ["Beta"]
+        assert parsed_tags.version == ""
+        assert parsed_tags.revision == ""
+
+    def test_parse_tags_leaves_other_numbered_tags_alone(
+        self, handler: FSRomsHandler
+    ):
+        """Only development stages collapse; revisions, versions and others stay put"""
+        parsed_tags = handler.parse_tags(
+            "Game (USA) (Rev 1) (v1.2) (Virtual Console) (Disc 2) (Proto).gg"
+        )
+
+        assert parsed_tags.revision == "1"
+        assert parsed_tags.version == "1.2"
+        assert parsed_tags.other_tags == ["Virtual Console", "Disc 2", "Proto"]
+
     def test_parse_tags_no_tags(self, handler: FSRomsHandler):
         """Test parse_tags with no tags"""
         fs_name = "Simple Game.rom"
