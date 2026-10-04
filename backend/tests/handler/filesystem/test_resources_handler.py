@@ -1809,3 +1809,100 @@ class TestCoverSingleFetch:
         assert client.requests == [COVER_URL]
         assert path_small == "collections/3/cover/small.png"
         assert path_big == "collections/3/cover/big.png"
+
+
+def _jpg_bytes(
+    size: tuple[int, int] = (600, 800), color: tuple[int, int, int] = (200, 40, 40)
+) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+class TestSingleStoredCover:
+    """A cover directory holds one cover, whatever extension it was written with.
+
+    `_get_cover_path` returns the first `big.*` in directory order, so a cover
+    left behind by an earlier write can outlive its replacement and win.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path):
+        handler = FSResourcesHandler()
+        handler.base_path = tmp_path
+        return handler
+
+    @pytest.fixture
+    def rom(self):
+        rom = Mock(spec=Rom)
+        rom.id = 1
+        rom.platform_id = 1
+        rom.fs_resources_path = "roms/1/1"
+        return rom
+
+    @staticmethod
+    def _cover_dir(handler: FSResourcesHandler, entity) -> Path:
+        return handler.base_path / entity.fs_resources_path / "cover"
+
+    @staticmethod
+    def _stored_covers(cover_dir: Path) -> set[str]:
+        return {path.name for path in cover_dir.iterdir()}
+
+    @classmethod
+    def _write_fetched_cover(cls, handler: FSResourcesHandler, entity) -> Path:
+        cover_dir = cls._cover_dir(handler, entity)
+        cover_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (900, 1200), (85, 62, 152)).save(cover_dir / "big.png")
+        Image.new("RGB", (180, 240), (85, 62, 152)).save(cover_dir / "small.png")
+        return cover_dir
+
+    async def test_uploaded_artwork_replaces_a_cover_with_another_extension(
+        self, handler: FSResourcesHandler, rom: Rom
+    ):
+        cover_dir = self._write_fetched_cover(handler, rom)
+
+        path_cover_l, path_cover_s = await handler.store_artwork(
+            rom, BytesIO(_jpg_bytes()), "jpg"
+        )
+
+        assert self._stored_covers(cover_dir) == {"big.jpg", "small.jpg"}
+        assert path_cover_l == "roms/1/1/cover/big.jpg"
+        assert path_cover_s == "roms/1/1/cover/small.jpg"
+
+    async def test_a_fetched_cover_replaces_uploaded_artwork(
+        self, handler: FSResourcesHandler, rom: Rom
+    ):
+        await handler.store_artwork(rom, BytesIO(_jpg_bytes()), "jpg")
+        client = _CountingClient(_png_bytes())
+
+        with patch("handler.filesystem.resources_handler.ctx_httpx_client") as mock_ctx:
+            mock_ctx.get.return_value = client
+            path_cover_s, path_cover_l = await handler.get_cover(rom, True, COVER_URL)
+
+        assert self._stored_covers(self._cover_dir(handler, rom)) == {
+            "big.png",
+            "small.png",
+        }
+        assert path_cover_l == "roms/1/1/cover/big.png"
+        assert path_cover_s == "roms/1/1/cover/small.png"
+
+    async def test_a_webp_copy_is_rebuilt_from_the_new_cover(
+        self, handler: FSResourcesHandler, rom: Rom
+    ):
+        cover_dir = self._write_fetched_cover(handler, rom)
+        Image.new("RGB", (900, 1200), (85, 62, 152)).save(cover_dir / "big.webp")
+
+        with patch(
+            "handler.filesystem.resources_handler.ENABLE_SCHEDULED_CONVERT_IMAGES_TO_WEBP",
+            True,
+        ):
+            await handler.store_artwork(rom, BytesIO(_jpg_bytes()), "jpg")
+
+        assert self._stored_covers(cover_dir) == {
+            "big.jpg",
+            "small.jpg",
+            "big.webp",
+            "small.webp",
+        }
+        with Image.open(cover_dir / "big.webp") as img:
+            assert img.size == (600, 800)
