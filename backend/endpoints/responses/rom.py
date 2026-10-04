@@ -510,6 +510,21 @@ class SiblingRomSchema(BaseModel):
         )
 
 
+def _main_siblings(db_rom: Rom, visible: Sequence[Rom], request: Request) -> set[int]:
+    """Ids among a rom's group that count as main for the requesting user.
+
+    Defers to resolve_main_siblings so every endpoint agrees with the gallery,
+    including the fallback to MAIN_SIBLING_DEFAULT_USER's choices.
+    """
+    # Imported here: response schemas are imported by the handlers' callers,
+    # and a module-level import would make this module depend on the database layer.
+    from handler.database import db_rom_handler
+
+    group = {db_rom.id} | {s.id for s in visible}
+    user_id = getattr(request.user, "id", None)
+    return db_rom_handler.resolve_main_siblings(user_id, {db_rom.id: group})[db_rom.id]
+
+
 def _visible_siblings(db_rom: Rom, request: Request) -> list[Rom]:
     """`db_rom.sibling_roms` minus any sibling hidden from the caller.
 
@@ -553,17 +568,9 @@ class SimpleRomSchema(RomSchema):
         if files is None:
             files = db_rom.files
         if siblings is None:
-            user_id = request.user.id
-            siblings = [
-                (
-                    s,
-                    any(
-                        ru.user_id == user_id and ru.is_main_sibling
-                        for ru in s.rom_users
-                    ),
-                )
-                for s in _visible_siblings(db_rom, request)
-            ]
+            visible = list(_visible_siblings(db_rom, request))
+            mains = _main_siblings(db_rom, visible, request)
+            siblings = [(s, s.id in mains) for s in visible]
 
         db_rom.included_files = list(files)  # type: ignore[attr-defined]
         db_rom.included_sibling_roms = [  # type: ignore[attr-defined]
@@ -631,16 +638,12 @@ class DetailedRomSchema(RomSchema):
         user_id = request.user.id
         db_rom = cls.populate_properties(db_rom, request)
 
+        visible = list(_visible_siblings(db_rom, request))
+        mains = _main_siblings(db_rom, visible, request)
         sorted_siblings = sorted(
             (
-                SiblingRomSchema.from_rom(
-                    s,
-                    is_main_sibling=any(
-                        ru.user_id == user_id and ru.is_main_sibling
-                        for ru in s.rom_users
-                    ),
-                )
-                for s in _visible_siblings(db_rom, request)
+                SiblingRomSchema.from_rom(s, is_main_sibling=s.id in mains)
+                for s in visible
             ),
             key=lambda x: x.sort_comparator,
         )

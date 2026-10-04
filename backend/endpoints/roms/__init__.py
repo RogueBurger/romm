@@ -210,6 +210,11 @@ def build_unscoped_sidecar_cache_key(
         user_part = f"{user_part}.{user_sort_cache_version(user_id)}"
     if group_by_meta_id:
         user_part = f"{user_part}.s{user_sibling_cache_version(user_id)}"
+        # The default user's picks stand in for this user's missing ones
+        # (MAIN_SIBLING_DEFAULT_USER), so their writes move this set too.
+        default_id = db_rom_handler.get_default_main_sibling_user_id()
+        if default_id is not None and default_id != user_id:
+            user_part = f"{user_part}.d{user_sibling_cache_version(default_id)}"
 
     return f"all:{user_part}:o{order_by}:d{order_dir}:g{int(group_by_meta_id)}"
 
