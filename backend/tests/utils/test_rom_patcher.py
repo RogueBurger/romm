@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 import zipfile
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
@@ -348,3 +350,77 @@ async def test_apply_patch_rejects_unsupported_archive_format(tmp_path: Path):
             tmp_path / "patch.bps",
             tmp_path / "patched.7z",
         )
+
+
+needs_xdelta3 = pytest.mark.skipif(
+    shutil.which("xdelta3") is None, reason="needs the xdelta3 binary"
+)
+
+
+async def _rompatcher_cannot_decode(*_args) -> bool:
+    # RomPatcher.js's own message for a VCDIFF patch with secondary compression
+    raise rom_patcher.PatcherError("not implemented: secondary decompressor")
+
+
+def _secondary_compressed_patch(tmp_path: Path) -> tuple[Path, Path, bytes]:
+    """A real VCDIFF patch made with xdelta3's DJW secondary compression."""
+    source = tmp_path / "game.nds"
+    target = tmp_path / "target.nds"
+    patch = tmp_path / "translation.xdelta"
+    base = bytes(range(256)) * 4096
+    changed = bytearray(base)
+    changed[1000:1100] = b"English text " * 7 + b"!" * 9
+    source.write_bytes(base)
+    target.write_bytes(bytes(changed))
+    subprocess.run(
+        ["xdelta3", "-e", "-f", "-S", "djw", "-s", str(source), str(target), str(patch)],
+        check=True,
+    )
+    return source, patch, bytes(changed)
+
+
+@needs_xdelta3
+@pytest.mark.asyncio
+async def test_secondary_compressed_vcdiff_is_applied_with_xdelta3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(rom_patcher, "_apply_with_rompatcher", _rompatcher_cannot_decode)
+    source, patch, expected = _secondary_compressed_patch(tmp_path)
+    output = tmp_path / "patched.nds"
+
+    assert await apply_patch(source, patch, output) is True
+    assert output.read_bytes() == expected
+
+
+@needs_xdelta3
+@pytest.mark.asyncio
+async def test_secondary_compressed_vcdiff_refuses_the_wrong_rom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(rom_patcher, "_apply_with_rompatcher", _rompatcher_cannot_decode)
+    source, patch, _expected = _secondary_compressed_patch(tmp_path)
+    source.write_bytes(bytes(reversed(source.read_bytes())))
+    output = tmp_path / "patched.nds"
+
+    with pytest.raises(rom_patcher.PatcherError, match="xdelta3"):
+        await apply_patch(source, patch, output)
+    assert not output.exists()
+
+
+@pytest.mark.asyncio
+async def test_other_patcher_errors_do_not_fall_back_to_xdelta3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    async def fails(*_args) -> bool:
+        raise rom_patcher.PatcherError("Unsupported or invalid patch format")
+
+    async def must_not_run(*_args) -> bool:
+        raise AssertionError("xdelta3 used for an unrelated failure")
+
+    monkeypatch.setattr(rom_patcher, "_apply_with_rompatcher", fails)
+    monkeypatch.setattr(rom_patcher, "_apply_with_xdelta3", must_not_run)
+    source = tmp_path / "game.nds"
+    source.write_bytes(b"rom")
+
+    with pytest.raises(rom_patcher.PatcherError, match="invalid patch format"):
+        await apply_patch(source, tmp_path / "x.xdelta", tmp_path / "out.nds")
