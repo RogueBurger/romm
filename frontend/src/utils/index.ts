@@ -186,6 +186,9 @@ export function regionToEmoji(region: string) {
     case "chn":
     case "china":
       return "🇨🇳";
+    case "dk":
+    case "denmark":
+      return "🇩🇰";
     case "e":
     case "eu":
     case "eur":
@@ -219,6 +222,9 @@ export function regionToEmoji(region: string) {
     case "k":
     case "korea":
       return "🇰🇷";
+    case "mx":
+    case "mexico":
+      return "🇲🇽";
     case "nl":
     case "netherlands":
       return "🇳🇱";
@@ -243,6 +249,7 @@ export function regionToEmoji(region: string) {
       return "🇺🇸";
     case "uk":
     case "england":
+    case "united kingdom":
       return "🇬🇧";
     case "unk":
     case "unknown":
