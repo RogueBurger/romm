@@ -315,6 +315,44 @@ class TestFSRomsHandler:
         assert handler.parse_tags("Game (japanese).rom").languages == ["Japanese"]
         assert handler.parse_tags("Game (no language).rom").languages == ["No Language"]
 
+    def test_parse_tags_no_intro_region_and_language_names(
+        self, handler: FSRomsHandler
+    ):
+        """Regions and languages No-Intro writes that the tables used to miss."""
+        parsed = handler.parse_tags("Game (United Kingdom).rom")
+        assert parsed.regions == ["England"]
+        assert parsed.other_tags == []
+        assert handler.parse_tags("Game (Denmark).rom").regions == ["Denmark"]
+        assert handler.parse_tags("Game (Mexico).rom").regions == ["Mexico"]
+
+        parsed = handler.parse_tags("Game (Europe) (En,Fr,Pl,Cs,Hu,Tr,Ca).rom")
+        assert parsed.languages == [
+            "English",
+            "French",
+            "Polish",
+            "Czech",
+            "Hungarian",
+            "Turkish",
+            "Catalan",
+        ]
+        assert parsed.other_tags == []
+
+    def test_parse_tags_regional_language_variants(self, handler: FSRomsHandler):
+        """A regional variant (Pt-BR, Es-XL) reads as its base language."""
+        parsed = handler.parse_tags("Game (USA) (En,Fr,Es-XL,Pt-BR).rom")
+        assert parsed.languages == ["English", "French", "Spanish", "Portuguese"]
+        assert parsed.other_tags == []
+        assert handler.parse_tags("Game (Canada) (Fr-CA).rom").languages == ["French"]
+        assert handler.parse_tags("Game (En-US,Es-MX).rom").languages == [
+            "English",
+            "Spanish",
+        ]
+
+        # Two letters, a hyphen, two letters, but no known base: still a tag.
+        parsed = handler.parse_tags("Game (Xx-YY).rom")
+        assert parsed.languages == []
+        assert "Xx-YY" in parsed.other_tags
+
     def test_parse_tags_language_codes_are_case_insensitive(
         self, handler: FSRomsHandler
     ):

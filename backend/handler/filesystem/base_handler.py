@@ -38,6 +38,8 @@ UUID_V4_REGEX = re.compile(
 
 LANGUAGES = (
     ("Ar", "Arabic"),
+    ("Ca", "Catalan"),
+    ("Cs", "Czech"),
     ("Da", "Danish"),
     ("De", "German"),
     ("El", "Greek"),
@@ -45,6 +47,7 @@ LANGUAGES = (
     ("Es", "Spanish"),
     ("Fi", "Finnish"),
     ("Fr", "French"),
+    ("Hu", "Hungarian"),
     ("It", "Italian"),
     ("Ja", "Japanese"),
     ("Ko", "Korean"),
@@ -55,6 +58,7 @@ LANGUAGES = (
     ("Ru", "Russian"),
     ("Sr", "Serbian"),
     ("Sv", "Swedish"),
+    ("Tr", "Turkish"),
     ("Zh", "Chinese"),
     ("nolang", "No Language"),
 )
@@ -65,6 +69,7 @@ REGIONS = (
     ("B", "Brazil"),
     ("C", "Canada"),
     ("CH", "China"),
+    ("DK", "Denmark"),
     ("E", "Europe"),
     ("F", "France"),
     ("FN", "Finland"),
@@ -75,6 +80,7 @@ REGIONS = (
     ("I", "Italy"),
     ("J", "Japan"),
     ("K", "Korea"),
+    ("MX", "Mexico"),
     ("NL", "Netherlands"),
     ("NO", "Norway"),
     ("PD", "Public Domain"),
@@ -95,6 +101,8 @@ REGIONS_BY_SHORTCODE = {region[0]: region[1] for region in REGIONS}
 _REGION_BY_ALIAS = {
     **{name.lower(): name for _, name in REGIONS},
     **{code.lower(): name for code, name in REGIONS},
+    # No-Intro's spelling of the UK region
+    "united kingdom": "England",
 }
 
 
@@ -114,6 +122,7 @@ REGION_NAME_TO_PROVIDER_SHORTCODE: dict[str, str] = {
     "Brazil": "br",
     "Canada": "ca",
     "China": "cn",
+    "Denmark": "dk",
     "England": "uk",
     "Europe": "eu",
     "Finland": "fi",
@@ -125,6 +134,7 @@ REGION_NAME_TO_PROVIDER_SHORTCODE: dict[str, str] = {
     "Italy": "it",
     "Japan": "jp",
     "Korea": "kr",
+    "Mexico": "mx",
     "Netherlands": "nl",
     "Norway": "no",
     "Russia": "ru",
@@ -191,13 +201,22 @@ _LANGUAGE_BY_ALIAS = {
 }
 
 
+REGIONAL_LANGUAGE_REGEX = re.compile(r"[a-z]{2}-[a-z]{2}")
+
+
 def normalize_language(tag: str) -> str | None:
     """Resolve a filename language tag to its canonical LANGUAGES name.
 
     Case-insensitive, so "english", "English" and "ENGLISH" collapse to one
     facet value. Returns None for tags that name no known language.
     """
-    return _LANGUAGE_BY_ALIAS.get(tag.strip().lower())
+    tag = tag.strip().lower()
+    language = _LANGUAGE_BY_ALIAS.get(tag)
+    if language is None and REGIONAL_LANGUAGE_REGEX.fullmatch(tag):
+        # A regional variant reads as its base language: No-Intro writes
+        # "Pt-BR", "Es-MX", "Fr-CA" and "Es-XL" (Latin American Spanish).
+        language = _LANGUAGE_BY_ALIAS.get(tag[:2])
+    return language
 
 
 class CoverSize(Enum):
