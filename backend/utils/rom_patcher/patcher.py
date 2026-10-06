@@ -205,6 +205,62 @@ async def _apply_binary_patch(
 ) -> bool:
     """Apply ``patch_path`` to ``rom_path`` and write the result to ``output_path``.
 
+    RomPatcher.js first; a VCDIFF patch it cannot decode because the patch uses
+    secondary compression (xdelta3's default for many releases) goes through the
+    ``xdelta3`` binary instead, when it is installed.
+    """
+    try:
+        return await _apply_with_rompatcher(rom_path, patch_path, output_path)
+    except PatcherError as e:
+        if "secondary decompressor" not in str(e) or not shutil.which("xdelta3"):
+            raise
+    await AnyioPath(output_path).unlink(missing_ok=True)
+    return await _apply_with_xdelta3(rom_path, patch_path, output_path)
+
+
+async def _apply_with_xdelta3(
+    rom_path: Path, patch_path: Path, output_path: Path
+) -> bool:
+    """Decode a VCDIFF patch with xdelta3.
+
+    xdelta3 verifies the checksums the patch carries and refuses a ROM they do
+    not fit, so a successful decode is a validated one.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "xdelta3",
+        "-d",
+        "-f",
+        "-s",
+        str(rom_path),
+        str(patch_path),
+        str(output_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=ROM_PATCHER_TIMEOUT
+        )
+    except TimeoutError as e:
+        proc.kill()
+        await proc.wait()
+        raise PatcherError(f"Patching timed out after {ROM_PATCHER_TIMEOUT}s") from e
+
+    if proc.returncode != 0:
+        await AnyioPath(output_path).unlink(missing_ok=True)
+        message = stderr.decode(errors="replace").strip() or "Patching failed"
+        raise PatcherError(f"xdelta3: {message}")
+
+    if not await AnyioPath(output_path).exists():
+        raise PatcherError("Patcher did not produce an output file")
+    return True
+
+
+async def _apply_with_rompatcher(
+    rom_path: Path, patch_path: Path, output_path: Path
+) -> bool:
+    """Apply a patch with RomPatcher.js (``patcher.js`` under Node).
+
     Returns whether the patch's embedded source checksum matched the ROM (always
     ``True`` for formats that carry no source checksum). The patch is applied
     regardless; the result lets callers warn on a likely ROM/patch mismatch.

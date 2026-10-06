@@ -239,7 +239,8 @@ RUN apk upgrade --no-cache && apk add --no-cache \
     7zip \
     tzdata \
     valkey \
-    valkey-cli
+    valkey-cli \
+    xdelta3
 
 # Add Python by copying it from the official Docker image. This way, we don't rely on Alpine's
 # Python version, which could not be the same as the one used in the backend build stage.
