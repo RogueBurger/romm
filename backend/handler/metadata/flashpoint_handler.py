@@ -1,6 +1,8 @@
 import datetime
 import json
+from collections.abc import Iterable
 from typing import Final, NotRequired, TypedDict
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 import pydash
@@ -40,6 +42,7 @@ class FlashpointGame(TypedDict):
     release_date: str
     language: str
     notes: str
+    launch_command: str
 
 
 class FlashpointMetadata(TypedDict):
@@ -55,6 +58,7 @@ class FlashpointMetadata(TypedDict):
     version: str | None
     language: str | None
     notes: str | None
+    launch_command: str | None
 
 
 class FlashpointRom(TypedDict):
@@ -92,7 +96,65 @@ def extract_flashpoint_metadata(game: FlashpointGame) -> FlashpointMetadata:
         version=game["version"],
         language=game["language"],
         notes=game["notes"],
+        launch_command=game.get("launch_command") or None,
     )
+
+
+# Flashpoint GameZIPs keep each file under `content/<host>/<path>`, the URL it
+# was served from. The launch command is the URL of the file that starts the
+# game -- for the game's current data pack. An older pack of the same game can
+# hold its files under other URLs, so fall back to the pack's only SWF, then to
+# a SWF of the same name.
+GAMEZIP_CONTENT_DIR: Final = "content/"
+
+
+def gamezip_member_for_url(url: str) -> str:
+    """The GameZIP member a URL is stored under (query string dropped)."""
+    parts = urlsplit(url.strip().strip('"'))
+    return f"{GAMEZIP_CONTENT_DIR}{parts.netloc}{unquote(parts.path)}"
+
+
+def gamezip_url_for_member(member: str) -> str:
+    """The original URL of a GameZIP member."""
+    return "http://" + quote(member.removeprefix(GAMEZIP_CONTENT_DIR))
+
+
+def resolve_gamezip_launch(
+    launch_command: str | None, members: Iterable[str]
+) -> tuple[str, str] | None:
+    """Pick the SWF that starts a GameZIP: (member, original URL), or None.
+
+    With no launch command (metadata fetched before it was kept), only the
+    fallbacks apply.
+    """
+    names = set(members)
+    launch_url = (launch_command or "").strip().strip('"')
+    wanted = ""
+    if launch_url.startswith(("http://", "https://")):
+        wanted = gamezip_member_for_url(launch_url)
+        if not wanted.lower().endswith(".swf"):
+            # Shockwave, HTML5, Java...: the game is not Flash, so no SWF in
+            # the pack starts it, however few there are
+            return None
+        if wanted in names:
+            return wanted, launch_url
+
+    swfs = sorted(
+        n
+        for n in names
+        if n.startswith(GAMEZIP_CONTENT_DIR) and n.lower().endswith(".swf")
+    )
+    if len(swfs) == 1:
+        return swfs[0], gamezip_url_for_member(swfs[0])
+
+    basename = wanted.rsplit("/", 1)[-1].lower()
+    same_name = [
+        n for n in swfs if basename and n.rsplit("/", 1)[-1].lower() == basename
+    ]
+    if len(same_name) == 1:
+        return same_name[0], gamezip_url_for_member(same_name[0])
+
+    return None
 
 
 class FlashpointHandler(MetadataHandler):
@@ -207,6 +269,7 @@ class FlashpointHandler(MetadataHandler):
                         "release_date": game_data.get("releaseDate", ""),
                         "language": game_data.get("language", ""),
                         "notes": game_data.get("notes", ""),
+                        "launch_command": game_data.get("launchCommand", ""),
                     }
                 )
                 for game_data in games_data
@@ -393,6 +456,7 @@ class FlashpointHandler(MetadataHandler):
                     "release_date": game_data["releaseDate"],
                     "language": game_data["language"],
                     "notes": game_data["notes"],
+                    "launch_command": game_data.get("launchCommand", ""),
                 }
             )
 

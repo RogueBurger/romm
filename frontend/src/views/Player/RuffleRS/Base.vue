@@ -8,7 +8,7 @@ import { ROUTES } from "@/plugins/router";
 import romApi from "@/services/api/rom";
 import type { DetailedRom } from "@/stores/roms";
 import type { RuffleSourceAPI } from "@/types/ruffle";
-import { getDownloadPath } from "@/utils";
+import { getRuffleSource, type RuffleSource } from "@/utils/ruffleSource";
 
 const RUFFLE_VERSION = "0.2.0-nightly.2025.8.14";
 const DEFAULT_BACKGROUND_COLOR = "#0D1117";
@@ -40,7 +40,7 @@ window.RufflePlayer = window.RufflePlayer || {};
 function onPlay() {
   gameRunning.value = true;
 
-  nextTick(() => {
+  nextTick(async () => {
     if (!rom.value) return;
 
     const ruffle = window.RufflePlayer.newest();
@@ -49,6 +49,14 @@ function onPlay() {
     const player = ruffle.createPlayer();
     const container = document.getElementById("game");
     container?.appendChild(player);
+
+    let source: RuffleSource;
+    try {
+      source = await getRuffleSource(rom.value);
+    } catch {
+      player.displayMessage(t("play.ruffle-no-launch-file"));
+      return;
+    }
     player.load({
       allowFullScreen: true,
       autoplay: "on",
@@ -58,7 +66,7 @@ function onPlay() {
       letterbox: "on",
       openUrlMode: "confirm",
       publicPath: "/assets/ruffle/",
-      url: getDownloadPath({ rom: rom.value }),
+      ...source,
     });
     player.style.width = "100%";
     player.style.height = "100%";
