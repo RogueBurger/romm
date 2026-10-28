@@ -562,9 +562,20 @@ function onStaticKeydown(e: KeyboardEvent) {
    width derived from the aspect-ratio alone is circular inside a
    shrink-to-fit ancestor (the match-dialog cell), and WebKit collapses
    that to a few pixels. `--r-cover-ratio` is set inline on this element
-   with the cover's measured ratio, so it wins over the card-level one. */
+   with the cover's measured ratio, so it wins over the card-level one.
+   Capped at 2:1 (matches `MAX_COVER_RATIO` in useGalleryVirtualItems,
+   which packs rows at the same cap): banner-shaped art (Flash / browser
+   games run to 10:1) would otherwise fill a whole row. */
 .r-gc:not(.r-gc--hero) .r-gc__art {
-  width: calc(var(--r-card-art-h) * var(--r-cover-ratio, 0.6667));
+  width: calc(var(--r-card-art-h) * min(var(--r-cover-ratio, 0.6667), 2));
+}
+/* A capped cover letterboxes (contain) so the whole image still shows.
+   Covers within the cap are unaffected: their box matches their ratio, and
+   contain renders identically to cover there. Same treatment as the list
+   view's xs cover (GameListRow); `!important` beats GameCover's inline
+   per-style object-fit. */
+.r-gc:not(.r-gc--hero) .r-gc__art > :deep(.game-cover__img) {
+  object-fit: contain !important;
 }
 /* Label fills the cover's width and ellipsises, without widening the card. */
 .r-gc:not(.r-gc--hero) .r-gc__label {

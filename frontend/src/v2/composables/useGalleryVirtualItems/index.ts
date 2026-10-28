@@ -55,6 +55,9 @@ const ROW_CHROME_PX = 41;
 const REFERENCE_COVER_WIDTH_PX = 158;
 // Box-art default — matches v1's `getAspectRatio` for `cover_path`.
 const DEFAULT_COVER_RATIO = 2 / 3;
+// Widest a card gets — matches the `min(…, 2)` cap on GameCard's art width.
+// Pack past it and a capped banner reserves row space its card never fills.
+export const MAX_COVER_RATIO = 2;
 
 // Fixed heights for the item kinds that DON'T depend on the boxart
 // aspect ratio. Row / skeleton-row are computed per-style — see
@@ -143,8 +146,8 @@ interface Options {
   /** Horizontal gap between cards in px (default 12). */
   gap?: MaybeRefOrGetter<number>;
   /** Natural cover ratio (w / h) for a position (card width =
-   *  `cardHeight * ratioAt(p)`). Falls back to `fallbackRatio` until the
-   *  image is measured. */
+   *  `cardHeight * ratioAt(p)`, capped at `MAX_COVER_RATIO`). Falls back to
+   *  `fallbackRatio` until the image is measured. */
   ratioAt?: (position: number) => number;
   /** Ratio to pack an unmeasured position at — must be the ratio its card
    *  actually paints, which is the active boxart style's box ratio: a card
@@ -249,7 +252,7 @@ export function useGalleryVirtualItems(opts: Options) {
     const fallback = fallbackRatio();
     return (position: number): number => {
       const r = opts.ratioAt?.(position);
-      return r != null && r > 0 ? r : fallback;
+      return r != null && r > 0 ? Math.min(r, MAX_COVER_RATIO) : fallback;
     };
   };
 
