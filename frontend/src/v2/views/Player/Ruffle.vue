@@ -10,7 +10,7 @@ import romApi from "@/services/api/rom";
 import storePlaying from "@/stores/playing";
 import type { DetailedRom } from "@/stores/roms";
 import type { RuffleSourceAPI } from "@/types/ruffle";
-import { getDownloadPath } from "@/utils";
+import { getRuffleSource, type RuffleSource } from "@/utils/ruffleSource";
 import PlayerShell from "@/v2/components/Player/PlayerShell.vue";
 import { useFullscreenFallback } from "@/v2/composables/useFullscreenFallback";
 import { useFullscreenPref } from "@/v2/composables/useFullscreenPref";
@@ -65,7 +65,7 @@ function onPlay() {
   // and pad-to-UI translation stay muted while the game owns input.
   playingStore.setPlaying(true);
 
-  nextTick(() => {
+  nextTick(async () => {
     if (!rom.value) {
       abortPlay();
       return;
@@ -84,6 +84,15 @@ function onPlay() {
       return;
     }
     container.appendChild(player);
+
+    let source: RuffleSource;
+    try {
+      source = await getRuffleSource(rom.value);
+    } catch {
+      // Leave the stage up so the message shows; its quit button still exits.
+      player.displayMessage(t("play.ruffle-no-launch-file"));
+      return;
+    }
     player.load({
       allowFullScreen: true,
       autoplay: "on",
@@ -93,7 +102,7 @@ function onPlay() {
       letterbox: "on",
       openUrlMode: "confirm",
       publicPath: "/assets/ruffle/",
-      url: getDownloadPath({ rom: rom.value }),
+      ...source,
     });
     player.style.width = "100%";
     player.style.height = "100%";

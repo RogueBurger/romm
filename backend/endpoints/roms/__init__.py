@@ -1,5 +1,7 @@
+import asyncio
 import binascii
 import json
+import mimetypes
 import re
 from base64 import b64encode
 from dataclasses import replace
@@ -8,7 +10,7 @@ from io import BytesIO
 from stat import S_IFREG
 from typing import Annotated, Any, Sequence
 from urllib.parse import quote
-from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
+from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile, ZipInfo
 
 import pydash
 from anyio import Path, open_file
@@ -46,6 +48,7 @@ from endpoints.responses.base import TypedLimitOffsetPage
 from endpoints.responses.recommendation import SimilarRomSchema
 from endpoints.responses.rom import (
     DetailedRomSchema,
+    GameZipLaunchSchema,
     RomUserSchema,
     SimpleRomSchema,
 )
@@ -89,6 +92,7 @@ from handler.metadata import (
     meta_upc_handler,
     scene_id_or_none,
 )
+from handler.metadata.flashpoint_handler import resolve_gamezip_launch
 from handler.metadata.launchbox_handler.media import populate_rom_specific_paths
 from handler.metadata.ss_handler import (
     ScreenScraperExhaustedError,
@@ -1466,6 +1470,115 @@ async def get_rom_content(
     return ZipResponse(
         content_lines=content_lines,
         filename=f"{quote(file_name)}.zip",
+    )
+
+
+# In-browser players read bare files, but some libraries keep each game as one
+# zip that another app owns and plays (Flashpoint GameZIPs). These two routes
+# let a player load a game, and the files it requests, straight out of the zip
+# without unpacking or touching it.
+def _single_zip_path(rom) -> str:
+    files = rom.files
+    if len(files) != 1 or not files[0].file_name.lower().endswith(".zip"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ROM {rom.id} is not a single zip file",
+        )
+    return f"{LIBRARY_BASE_PATH}/{files[0].full_path}"
+
+
+def _zip_member_names(zip_path: str) -> list[str]:
+    with ZipFile(zip_path) as zip_file:
+        return zip_file.namelist()
+
+
+def _read_zip_member(zip_path: str, member: str) -> bytes | None:
+    with ZipFile(zip_path) as zip_file:
+        names = zip_file.namelist()
+        if member not in names:
+            # Flash games were often served from case-insensitive hosts
+            folded = member.casefold()
+            member = next((n for n in names if n.casefold() == folded), "")
+            if not member:
+                return None
+        return zip_file.read(member)
+
+
+@protected_route(
+    router.get,
+    "/{id}/zip-launch",
+    [] if DISABLE_DOWNLOAD_ENDPOINT_AUTH else [Scope.ROMS_READ],
+    responses={status.HTTP_404_NOT_FOUND: {}},
+)
+async def get_rom_zip_launch(
+    request: Request,
+    id: Annotated[int, PathVar(description="Rom internal id.", ge=1)],
+) -> GameZipLaunchSchema:
+    """Find the file that starts a single-zip rom (a Flashpoint GameZIP)."""
+
+    rom = db_rom_handler.get_rom(id)
+    if not rom:
+        raise RomNotFoundInDatabaseException(id)
+
+    assert_rom_visible(request, rom)
+
+    zip_path = _single_zip_path(rom)
+    try:
+        names = await asyncio.to_thread(_zip_member_names, zip_path)
+    except (FileNotFoundError, BadZipFile) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ROM {id}'s zip cannot be read",
+        ) from exc
+
+    launch = resolve_gamezip_launch(
+        (rom.flashpoint_metadata or {}).get("launch_command"), names
+    )
+    if not launch:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No file in ROM {id}'s zip is known to start the game",
+        )
+
+    return GameZipLaunchSchema(path=launch[0], url=launch[1])
+
+
+@protected_route(
+    router.get,
+    "/{id}/zip/{member:path}",
+    [] if DISABLE_DOWNLOAD_ENDPOINT_AUTH else [Scope.ROMS_READ],
+    responses={status.HTTP_404_NOT_FOUND: {}},
+)
+async def get_rom_zip_member(
+    request: Request,
+    id: Annotated[int, PathVar(description="Rom internal id.", ge=1)],
+    member: Annotated[str, PathVar(description="Path of a file inside the zip.")],
+):
+    """Serve one file from inside a single-zip rom, leaving the zip untouched."""
+
+    rom = db_rom_handler.get_rom(id)
+    if not rom:
+        raise RomNotFoundInDatabaseException(id)
+
+    assert_rom_visible(request, rom)
+
+    zip_path = _single_zip_path(rom)
+    try:
+        content = await asyncio.to_thread(_read_zip_member, zip_path, member)
+    except (FileNotFoundError, BadZipFile) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ROM {id}'s zip cannot be read",
+        ) from exc
+    if content is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{member} is not in ROM {id}'s zip",
+        )
+
+    return Response(
+        content=content,
+        media_type=mimetypes.guess_type(member)[0] or "application/octet-stream",
     )
 
 

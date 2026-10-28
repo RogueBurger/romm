@@ -150,6 +150,7 @@
   "resume-failed": "Could not load the selected state. The game started fresh.",
   "resume-from-save": "Resume from save",
   "resume-from-state": "Resume from state",
+  "ruffle-no-launch-file": "Could not tell which Flash file in this game's zip starts it.",
   "save-and-quit": "Save and quit",
   "save-data": "Save data",
   "save-data-detail": "Updated {time} · {size}",

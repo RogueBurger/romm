@@ -225,6 +225,11 @@ class TrackMetaSchema(BaseModel):
     cover_path: str | None = None
 
 
+class GameZipLaunchSchema(BaseModel):
+    path: str = Field(description="Zip member that starts the game.")
+    url: str = Field(description="URL the game was originally served from.")
+
+
 class DocMetaSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

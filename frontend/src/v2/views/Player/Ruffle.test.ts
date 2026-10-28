@@ -14,6 +14,7 @@ import Ruffle from "./Ruffle.vue";
 
 const mocks = vi.hoisted(() => ({
   getRom: vi.fn(),
+  getRuffleSource: vi.fn(),
   playSessionStart: vi.fn(),
   flushPlaySession: vi.fn(),
   push: vi.fn(),
@@ -49,8 +50,8 @@ vi.mock("@/stores/roms", () => ({
   default: () => ({ currentRom: null }),
 }));
 
-vi.mock("@/utils", () => ({
-  getDownloadPath: () => "/api/roms/1/content/game.swf",
+vi.mock("@/utils/ruffleSource", () => ({
+  getRuffleSource: mocks.getRuffleSource,
 }));
 
 vi.mock("@/v2/components/shared/GameCover.vue", () => ({
@@ -106,6 +107,9 @@ afterAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getRom.mockResolvedValue({ data: rom });
+  mocks.getRuffleSource.mockResolvedValue({
+    url: "/api/roms/1/content/game.swf",
+  });
   window.RufflePlayer = {
     newest: () => null,
   } as unknown as typeof window.RufflePlayer;
@@ -114,11 +118,13 @@ beforeEach(() => {
 function makeRuffleSource(): RuffleSourceAPI {
   const player = Object.assign(document.createElement("div"), {
     load: vi.fn(),
+    displayMessage: vi.fn(),
     fullscreenEnabled: false,
     enterFullscreen: vi.fn(),
   });
   return {
     createPlayer: () => player,
+    player,
   } as unknown as RuffleSourceAPI;
 }
 
@@ -141,6 +147,7 @@ async function mountAndPlay(): Promise<VueWrapper> {
   await flushPromises();
   await wrapper.get(".r-v2-player__play").trigger("click");
   await nextTick();
+  await flushPromises();
   return wrapper;
 }
 
@@ -171,6 +178,59 @@ describe("Ruffle launch", () => {
     expect(mocks.playSessionStart).not.toHaveBeenCalled();
     expect(mocks.setPlaying).toHaveBeenLastCalledWith(false);
     expect(dispatchUnload().defaultPrevented).toBe(false);
+    wrapper.unmount();
+  });
+
+  // Flashpoint GameZIPs: Ruffle gets the launch SWF's original URL and the
+  // rule that rewrites original hosts into the zip.
+  it("loads a zipped game from its original URL through the zip", async () => {
+    const source = makeRuffleSource();
+    window.RufflePlayer = {
+      newest: () => source,
+    } as unknown as typeof window.RufflePlayer;
+    const rules = [[/^https?:\/\/(.*)$/, "/api/roms/1/zip/content/$1"]];
+    mocks.getRuffleSource.mockResolvedValue({
+      url: "http://example.com/game.swf",
+      urlRewriteRules: rules,
+    });
+
+    const wrapper = await mountAndPlay();
+
+    const player = (
+      source as unknown as { player: { load: ReturnType<typeof vi.fn> } }
+    ).player;
+    expect(player.load).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "http://example.com/game.swf",
+        urlRewriteRules: rules,
+      }),
+    );
+    expect(mocks.playSessionStart).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
+  it("says so, and starts no session, when no file is known to start it", async () => {
+    const source = makeRuffleSource();
+    window.RufflePlayer = {
+      newest: () => source,
+    } as unknown as typeof window.RufflePlayer;
+    mocks.getRuffleSource.mockRejectedValue(new Error("404"));
+
+    const wrapper = await mountAndPlay();
+
+    const player = (
+      source as unknown as {
+        player: {
+          load: ReturnType<typeof vi.fn>;
+          displayMessage: ReturnType<typeof vi.fn>;
+        };
+      }
+    ).player;
+    expect(player.displayMessage).toHaveBeenCalledWith(
+      "play.ruffle-no-launch-file",
+    );
+    expect(player.load).not.toHaveBeenCalled();
+    expect(mocks.playSessionStart).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });

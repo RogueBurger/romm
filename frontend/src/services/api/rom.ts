@@ -522,6 +522,12 @@ async function getRom({
   return api.get<DetailedRom>(`/roms/${romId}`, { signal });
 }
 
+// The file that starts a rom kept as one zip (a Flashpoint GameZIP), and the
+// URL it was originally served from.
+async function getRomZipLaunch({ romId }: { romId: number }) {
+  return api.get<{ path: string; url: string }>(`/roms/${romId}/zip-launch`);
+}
+
 async function getRomSimple({
   romId,
   signal,
@@ -1076,6 +1082,7 @@ export default {
   getSimilarRoms,
   getRecommendedRoms,
   getRom,
+  getRomZipLaunch,
   getRomSimple,
   getRandomRom,
   getRomByMetadataProvider,
